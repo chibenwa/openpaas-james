@@ -11,6 +11,8 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 
+import com.linagora.openpaas.deployment.ImageTag;
+
 public class OpenpaasJamesDistributedLdapExtension implements BeforeEachCallback, AfterEachCallback {
     private static final int ONE_TIME = 1;
 
@@ -81,7 +83,7 @@ public class OpenpaasJamesDistributedLdapExtension implements BeforeEachCallback
 
     @SuppressWarnings("resource")
     private GenericContainer<?> createOpenPaasJamesDistributedLdap() {
-        return new GenericContainer<>("linagora/openpaas-james-distributed-ldap:latest")
+        return new GenericContainer<>("linagora/openpaas-james-distributed-ldap:" + ImageTag.retrieve())
             .withNetworkAliases("james-distributed-ldap")
             .withNetwork(network)
             .waitingFor(Wait.forLogMessage(".*Web admin server started.*\\n", ONE_TIME));

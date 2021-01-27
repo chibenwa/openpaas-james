@@ -45,3 +45,10 @@ mvn clean install -Dmaven.javadoc.skip=true
 ```
 
 You can add the `-DskipTests` flag as well if you don't want to run the tests of the `apache/james-project`.
+
+An additional `image.tag` maven property governs the tag of the built docker images and can for 
+example be leveraged by build environment to achieve isolation on top of a shared docker daemon. Defaults to `latest`.
+
+```
+mvn clean install -Dmaven.javadoc.skip=true -Dimage.tag=my-unique-tag
+```

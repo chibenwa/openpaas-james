@@ -205,7 +205,7 @@
                     <to>
                         <image>linagora/openpaas-james-distributed</image>
                         <tags>
-                            <tag>latest</tag>
+                            <tag>${image.tag}</tag>
                         </tags>
                     </to>
                     <container>

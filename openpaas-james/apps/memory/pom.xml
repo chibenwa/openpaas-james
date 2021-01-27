@@ -124,7 +124,7 @@
                     <to>
                         <image>linagora/openpaas-james-memory</image>
                         <tags>
-                            <tag>latest</tag>
+                            <tag>${image.tag}</tag>
                         </tags>
                     </to>
                     <container>

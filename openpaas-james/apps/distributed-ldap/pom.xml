@@ -167,7 +167,7 @@
                     <to>
                         <image>linagora/openpaas-james-distributed-ldap</image>
                         <tags>
-                            <tag>latest</tag>
+                            <tag>${image.tag}</tag>
                         </tags>
                     </to>
                     <container>

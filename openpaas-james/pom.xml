@@ -28,6 +28,7 @@
         <james.groupId>org.apache.james</james.groupId>
         <james.version>3.6.0-SNAPSHOT</james.version>
         <james.protocols.groupId>${james.groupId}.protocols</james.protocols.groupId>
+        <image.tag>latest</image.tag>
     </properties>
 
     <dependencyManagement>
