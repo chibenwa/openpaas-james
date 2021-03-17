@@ -9,6 +9,8 @@ import org.apache.james.FakeSearchMailboxModule;
 import org.apache.james.GuiceJamesServer;
 import org.apache.james.JamesServerMain;
 import org.apache.james.modules.protocols.IMAPServerModule;
+import org.apache.james.modules.protocols.JMAPServerModule;
+import org.apache.james.modules.protocols.JmapEventBusModule;
 import org.apache.james.modules.protocols.ProtocolHandlerModule;
 import org.apache.james.modules.protocols.SMTPServerModule;
 import org.apache.james.modules.server.DKIMMailetModule;
@@ -20,6 +22,7 @@ import com.google.inject.Module;
 import com.google.inject.util.Modules;
 import com.linagora.openpaas.james.jmap.method.CustomMethodModule;
 import com.linagora.openpaas.james.jmap.method.FilterGetMethodModule;
+import com.linagora.openpaas.james.jmap.ticket.TicketRoutesModule;
 
 public class MemoryServer {
     public static final Module PROTOCOLS = Modules.combine(
@@ -27,18 +30,19 @@ public class MemoryServer {
         new ProtocolHandlerModule(),
         new SMTPServerModule());
 
-    public static final Module IN_MEMORY_SERVER_AGGREGATE_MODULE = Modules.combine(
+    public static final Module JMAP_LINAGORA = Modules.combine(
+        JMAP,
+        new CustomMethodModule(),
+        new FilterGetMethodModule(),
+        new TicketRoutesModule());
+
+    public static final Module MODULES = Modules.combine(
         IN_MEMORY_SERVER_MODULE,
         PROTOCOLS,
-        JMAP,
+        JMAP_LINAGORA,
         WEBADMIN,
         new DKIMMailetModule(),
         new SpamAssassinListenerModule());
-
-    public static final Module MODULES = Modules.combine(
-        IN_MEMORY_SERVER_AGGREGATE_MODULE,
-        new CustomMethodModule(),
-        new FilterGetMethodModule());
 
     public static void main(String[] args) throws Exception {
         Configuration configuration = Configuration.builder()
