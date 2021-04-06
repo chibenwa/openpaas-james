@@ -89,6 +89,6 @@ class EncrypterTest {
 
         assertThatThrownBy(() -> Decrypter.forKey(ClassLoader.getSystemClassLoader().getResourceAsStream("gpg2.private"), "123456".toCharArray())
             .decrypt(new ByteArrayInputStream(out.toByteArray())))
-            .isInstanceOf(PGPException.class);
+            .isInstanceOf(Exception.class);
     }
 }
