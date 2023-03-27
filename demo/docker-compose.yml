@@ -1,5 +1,6 @@
 version: "3"
 
+
 services:
   tmail-frontend:
     image: linagora/tmail-web:master
@@ -37,9 +38,9 @@ services:
     networks:
       - tmail
 
-  lemonldap:
+  sso.example.com:
     image: yadd/lemonldap-ng-full
-    container_name: lemonldap
+    container_name: sso.example.com
     ports:
       - "80:80"
     environment:
@@ -76,7 +77,7 @@ services:
 
   krakend:
     depends_on:
-      - lemonldap
+      - sso.example.com
       - tmail-backend
     container_name: krakend
     image: devopsfaith/krakend:latest

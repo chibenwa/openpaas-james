@@ -17,10 +17,6 @@ start_services() {
     docker compose up -d
     retvar=$?
     if [[ retvar -eq 0 ]]; then
-        lemonldap_service="lemonldap"
-        lemonldap_ip=$(docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$lemonldap_service")
-        docker compose exec krakend sh -c "echo ${lemonldap_ip} sso.example.com >> /etc/hosts"
-
         echo
         echo "Please add the following line to your '/etc/hosts' file"
         echo
