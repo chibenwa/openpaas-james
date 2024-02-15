@@ -1,6 +1,7 @@
 package com.linagora.tmail.james.jmap.label
 
 import java.time.{Clock, Instant}
+import java.util.function.Supplier
 
 import com.google.common.collect.{HashBasedTable, Table, Tables}
 import com.linagora.tmail.james.jmap.label.LabelChangeRepository.DEFAULT_MAX_IDS_TO_RETURN
@@ -32,6 +33,10 @@ case class LabelChange(accountId: AccountId,
                        destroyed: Set[LabelId] = Set(),
                        state: State) extends JmapChange {
   override def getAccountId: AccountId = accountId
+
+  override def forSharee(accountId: AccountId, state: Supplier[State]): JmapChange = ???
+
+  override def isNoop: Boolean = false
 }
 
 case object LabelTypeName extends TypeName {
