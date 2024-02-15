@@ -30,7 +30,6 @@ import org.apache.james.blob.aes.AESBlobStoreDAO;
 import org.apache.james.blob.aes.CryptoConfig;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BlobStoreDAO;
-import org.apache.james.blob.api.BucketName;
 import org.apache.james.blob.cassandra.cache.CachedBlobStore;
 import org.apache.james.blob.objectstorage.aws.S3BlobStoreDAO;
 import org.apache.james.eventsourcing.Event;
@@ -60,7 +59,7 @@ import com.google.inject.name.Named;
 import com.google.inject.name.Names;
 
 public class BlobStoreModulesChooser {
-    private static final String WRAPPED = "wrapped";
+    private static final String UNENCRYPTED = "unencrypted";
 
     static class EncryptionModule extends AbstractModule {
         private final CryptoConfig cryptoConfig;
@@ -71,13 +70,11 @@ public class BlobStoreModulesChooser {
 
         @Provides
         @Singleton
-        @Named(WRAPPED)
-        BlobStoreDAO blobStoreDAO(S3BlobStoreDAO unencrypted) {
+        BlobStoreDAO blobStoreDAO(@Named(UNENCRYPTED) BlobStoreDAO unencrypted) {
             return new AESBlobStoreDAO(unencrypted, cryptoConfig);
         }
 
         @Provides
-        @Named(WRAPPED)
         CryptoConfig cryptoConfig() {
             return cryptoConfig;
         }
@@ -86,7 +83,7 @@ public class BlobStoreModulesChooser {
     static class NoEncryptionModule extends AbstractModule {
         @Provides
         @Singleton
-        BlobStoreDAO blobStoreDAO(S3BlobStoreDAO unencrypted) {
+        BlobStoreDAO blobStoreDAO(@Named(UNENCRYPTED) BlobStoreDAO unencrypted) {
             return unencrypted;
         }
     }
@@ -102,14 +99,7 @@ public class BlobStoreModulesChooser {
             install(new S3BucketModule());
             install(new S3BlobStoreModule());
             install(new SingleSaveBlobStoreModule());
-        }
-
-        @Provides
-        @Singleton
-        BlobStoreDAO blobStoreDAO(@Named(WRAPPED) BlobStoreDAO s3OrAes,
-                                  BlobIdList blobIdList,
-                                  BucketName defaultBucketName) {
-            return new SingleSaveBlobStoreDAO(s3OrAes, blobIdList, defaultBucketName);
+            bind(BlobStoreDAO.class).annotatedWith(Names.named(UNENCRYPTED)).to(SingleSaveBlobStoreDAO.class);
         }
     }
 
@@ -118,7 +108,7 @@ public class BlobStoreModulesChooser {
         protected void configure() {
             install(new S3BucketModule());
             install(new S3BlobStoreModule());
-            bind(BlobStoreDAO.class).annotatedWith(Names.named(WRAPPED)).to(S3BlobStoreDAO.class);
+            bind(BlobStoreDAO.class).annotatedWith(Names.named(UNENCRYPTED)).to(S3BlobStoreDAO.class);
         }
     }
 
