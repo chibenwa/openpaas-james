@@ -18,6 +18,7 @@ import org.apache.james.jmap.routes.SessionSupplier
 import org.apache.james.mailbox.MailboxSession
 import org.apache.james.metrics.api.MetricFactory
 import org.apache.james.user.api.UsersRepository
+import org.apache.james.util.ReactorUtils
 import org.reactivestreams.Publisher
 import play.api.libs.json.JsObject
 import reactor.core.scala.publisher.{SFlux, SMono}
@@ -40,82 +41,106 @@ class TeamMailboxMemberSetMethod @Inject()(val teamMailboxRepository: TeamMailbo
                          invocation: InvocationWithContext,
                          mailboxSession: MailboxSession,
                          request: TeamMailboxMemberSetRequest): Publisher[InvocationWithContext] =
-    update(mailboxSession.getUser, request)
+    performUpdates(mailboxSession.getUser, request)
       .map(response => Invocation(
         methodName = methodName,
         arguments = Arguments(Serializer.serializeSetResponse(response).as[JsObject]),
         methodCallId = invocation.invocation.methodCallId))
       .map(InvocationWithContext(_, invocation.processingContext))
 
-  private def update(username: Username, request: TeamMailboxMemberSetRequest): SMono[TeamMailboxMemberSetResponse] =
+  private def performUpdates(username: Username, request: TeamMailboxMemberSetRequest): SMono[TeamMailboxMemberSetResponse] =
     SFlux.fromIterable(request.validatedUpdateRequest())
-      .flatMap(parsingRequestResult => update(username, parsingRequestResult))
+      .flatMap(parsingRequestResult => performUpdate(username, parsingRequestResult), ReactorUtils.LOW_CONCURRENCY)
       .collectSeq()
       .map(listResult => TeamMailboxMemberSetResponse.from(request.accountId, listResult))
 
-  private def update(username: Username,
-                     parsingRequestResult: ParsingRequestResult): SMono[TeamMailboxMemberSetResult] =
-    parsingRequestResult match {
-      case ParsingRequestFailure(teamMailboxNameDTO, exception) => SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailboxNameDTO, SetErrorDescription(exception.message)))
-      case ParsingRequestSuccess(teamMailbox, membersUpdateToAdd, membersUpdateToRemove) =>
-        checkIfAnyUsersDoesNotExist(membersUpdateToAdd, membersUpdateToRemove)
-          .collectSeq()
-          .filter(usernames => usernames.nonEmpty)
-          .map(usernames => TeamMailboxMemberSetResult.notUpdated(teamMailbox,
-            SetErrorDescription(s"Some users do not exist in the system: ${usernames.map(username => username.asString()).toArray.mkString("", ", ", "")}")))
-          .switchIfEmpty(updateTeamMailboxMembers(username, teamMailbox, membersUpdateToAdd, membersUpdateToRemove))
-          .onErrorResume {
-            case _: TeamMailboxNotFoundException => SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
-            case _: Throwable => SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailbox, SetErrorDescription("Internal error")))
+  private def performUpdate(username: Username, parsingRequestResult: ParsingRequestResult): SMono[TeamMailboxMemberSetResult] =
+    {
+        val r: SMono[TeamMailboxMemberSetResult] = for {
+          requestWithValidSyntax <- validateSyntax(parsingRequestResult)
+          requestWithUserExistenceValidation <- validateUsersExist(requestWithValidSyntax)
+          presentMembers <- retrievePresentMembers(requestWithUserExistenceValidation)
+          requestWithAuthorizationValidation <- validateAuthorizations(username, requestWithUserExistenceValidation, presentMembers)
+          requestWithAuthorizationValidation <- validateNoChangeToManagers(requestWithAuthorizationValidation, presentMembers)
+          result <- updateMembers(requestWithAuthorizationValidation)
+        } yield {
+          result
+        }
+        r.onErrorResume {
+            case e: NonExistingUsers => SMono.just(TeamMailboxMemberSetResult.notUpdated(e.teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
+            case e: NotAuthorized =>SMono.just(TeamMailboxMemberSetResult.notUpdated(e.teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
+            case e: NonExistingUsers => SMono.just(TeamMailboxMemberSetResult.notUpdated(e.teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
+            case e: TeamMailboxNotFoundException => SMono.just(TeamMailboxMemberSetResult.notUpdated(e.teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
+            case e: ManagerAuthorizationChanged => SMono.just(TeamMailboxMemberSetResult.notUpdated(e.teamMailbox, SetErrorDescription(s"Could not update or remove manager ${e.username.asString()}")))
+            case e: InvalidSyntax => SMono.just(TeamMailboxMemberSetResult.notUpdated(e.failure.teamMailboxName, SetErrorDescription(e.failure.exception.message)))
           }
     }
 
-  private def checkIfAnyUsersDoesNotExist(membersUpdateToAdd: List[TeamMailboxMember],
-                                membersUpdateToRemove: Set[Username]): SFlux[Username] =
-    SFlux.fromIterable(membersUpdateToRemove.concat(membersUpdateToAdd.map(teamMailboxMember => teamMailboxMember.username)))
+
+  private def retrievePresentMembers(requestWithUserExistenceValidation: ParsingRequestSuccess): SMono[Map[Username, TeamMailboxMember]] =
+    SFlux(teamMailboxRepository.listMembers(requestWithUserExistenceValidation.teamMailbox)).collectMap(_.username, role => role)
+
+  private case class NonExistingUsers(teamMailbox: TeamMailbox, usersNotFound: Seq[Username]) extends RuntimeException
+  private case class InvalidSyntax(failure: ParsingRequestFailure) extends RuntimeException
+  private case class NotAuthorized(teamMailbox: TeamMailbox) extends RuntimeException
+  private case class ManagerAuthorizationChanged(teamMailbox: TeamMailbox, username: Username) extends RuntimeException
+
+  private def validateSyntax(request: ParsingRequestResult): SMono[ParsingRequestSuccess] =
+    request match {
+      case failure: ParsingRequestFailure => SMono.error(InvalidSyntax(failure))
+        // SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailboxNameDTO, SetErrorDescription(exception.message)))
+      case validatedRequest: ParsingRequestSuccess => SMono.just(validatedRequest)
+    }
+
+  private def validateUsersExist(request: ParsingRequestSuccess): SMono[ParsingRequestSuccess] =
+    SFlux.fromIterable(request.impactedUsers)
       .flatMap(username => SMono(usersRepository.containsReactive(username))
         .filter(userExist => !userExist)
         .map(_ => username))
+      .collectSeq()
+      .handle {
+        case (names, sink) => if (names.isEmpty) {
+          sink.next(request)
+        } else {
+          sink.error(NonExistingUsers(request.teamMailbox, names))
+        }
+      }
 
-  private def updateTeamMailboxMembers(username: Username,
-                                       teamMailbox: TeamMailbox,
-                                       membersUpdateToAdd: List[TeamMailboxMember],
-                                       membersUpdateToRemove: Set[Username]): SMono[TeamMailboxMemberSetResult] =
-    SFlux(teamMailboxRepository.listMembers(teamMailbox))
-      .collectMap(member => member.username, member => member)
-      .flatMap(presentMembers => presentMembers.get(username) match {
-        case Some(member) =>
-          member.role.value match {
-            case ManagerRole => updateTeamMailboxMembers(teamMailbox, membersUpdateToAdd, membersUpdateToRemove, presentMembers)
-            case _ => SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailbox, SetErrorDescription(s"Not manager of teamMailbox ${teamMailbox.asString()}")))
-          }
-        case None => SMono.just(TeamMailboxMemberSetResult.notUpdated(teamMailbox, SetErrorDescription("Team mailbox is not found or not a member of the mailbox")))
-      })
+  private def validateAuthorizations(username: Username, request: ParsingRequestSuccess, presentMembers: Map[Username, TeamMailboxMember]): SMono[ParsingRequestSuccess] =
+    presentMembers.get(username) match {
+      case Some(member) =>
+        member.role.value match {
+          case ManagerRole => SMono.just(request)
+          case _ => SMono.error(NotAuthorized(request.teamMailbox))
+        }
+      case None => SMono.error(TeamMailboxNotFoundException(request.teamMailbox))
+    }
 
-  private def updateTeamMailboxMembers(teamMailbox: TeamMailbox,
-                                       membersUpdateToAdd: List[TeamMailboxMember],
-                                       membersUpdateToRemove: Set[Username],
-                                       presentMembers: Map[Username, TeamMailboxMember]): SMono[TeamMailboxMemberSetResult] =
-    SFlux.fromIterable(membersUpdateToRemove.concat(membersUpdateToAdd.map(teamMailboxMember => teamMailboxMember.username)))
+  private def validateNoChangeToManagers(request: ParsingRequestSuccess,
+                                       presentMembers: Map[Username, TeamMailboxMember]): SMono[ParsingRequestSuccess] =
+    SFlux.fromIterable(request.impactedUsers)
       .filter(username => presentMembers.contains(username) && ManagerRole.equals(presentMembers(username).role.value))
       .next()
-      .map(username => TeamMailboxMemberSetResult.notUpdated(teamMailbox, SetErrorDescription(s"Could not update or remove manager ${username.asString()}")))
-      .switchIfEmpty(updateMembers(teamMailbox, membersUpdateToAdd, membersUpdateToRemove))
+      .handle {
+        case (username, sink) => sink.error(ManagerAuthorizationChanged(request.teamMailbox, username))
+      }
+      .switchIfEmpty(SMono.just(request))
 
-  private def updateMembers(teamMailbox: TeamMailbox,
-                            membersUpdateToAdd: List[TeamMailboxMember],
-                            membersUpdateToRemove: Set[Username]): SMono[TeamMailboxMemberSetResult] =
-    removeMember(teamMailbox, membersUpdateToRemove)
-      .`then`(addMember(teamMailbox, membersUpdateToAdd))
-      .`then`(SMono.just(TeamMailboxMemberSetResult(Option[TeamMailboxNameDTO](TeamMailboxNameDTO(teamMailbox.asString())), Option.empty)))
+  private def updateMembers(request: ParsingRequestSuccess): SMono[TeamMailboxMemberSetResult] =
+    removeMembers(request.teamMailbox, request.membersUpdateToRemove)
+      .`then`(addMembers(request.teamMailbox, request.membersUpdateToAdd))
+      .`then`(SMono.just(TeamMailboxMemberSetResult(Option[TeamMailboxNameDTO](TeamMailboxNameDTO(request.teamMailbox.asString())), Option.empty)))
+      .onErrorResume {
+        _: Throwable => SMono.just(TeamMailboxMemberSetResult.notUpdated(request.teamMailbox, SetErrorDescription("Internal error")))
+      }
 
-  private def addMember(teamMailbox: TeamMailbox, members: List[TeamMailboxMember]): SMono[Unit] =
+  private def addMembers(teamMailbox: TeamMailbox, members: List[TeamMailboxMember]): SMono[Unit] =
     SFlux.fromIterable(members)
-      .flatMap(member => teamMailboxRepository.addMember(teamMailbox, member))
+      .flatMap(member => teamMailboxRepository.addMember(teamMailbox, member), ReactorUtils.LOW_CONCURRENCY)
       .`then`()
 
-  private def removeMember(teamMailbox: TeamMailbox, usernames: Set[Username]): SMono[Unit] =
+  private def removeMembers(teamMailbox: TeamMailbox, usernames: Set[Username]): SMono[Unit] =
     SFlux.fromIterable(usernames)
-      .flatMap(username => teamMailboxRepository.removeMember(teamMailbox, username))
+      .flatMap(username => teamMailboxRepository.removeMember(teamMailbox, username), ReactorUtils.LOW_CONCURRENCY)
       .`then`()
 }

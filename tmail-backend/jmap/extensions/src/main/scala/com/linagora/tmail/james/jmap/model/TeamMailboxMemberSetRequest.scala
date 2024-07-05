@@ -30,8 +30,10 @@ trait ParsingRequestResult
 
 case class ParsingRequestSuccess(teamMailbox: TeamMailbox,
                                  membersUpdateToAdd: List[TeamMailboxMember],
-                                 membersUpdateToRemove: Set[Username]) extends ParsingRequestResult
-case class ParsingRequestFailure(tmbNameDto: TeamMailboxNameDTO, exception: ParsingRequestException) extends ParsingRequestResult
+                                 membersUpdateToRemove: Set[Username]) extends ParsingRequestResult {
+  def impactedUsers: Seq[Username] = membersUpdateToRemove.concat(membersUpdateToAdd.map(teamMailboxMember => teamMailboxMember.username))
+}
+case class ParsingRequestFailure(teamMailboxName: TeamMailboxNameDTO, exception: ParsingRequestException) extends ParsingRequestResult
 
 case class TeamMailboxMemberSetRequest(accountId: AccountId,
                                        update: Map[TeamMailboxNameDTO, Map[TeamMailboxMemberName, Option[TeamMailboxMemberRoleDTO]]]) extends WithAccountId {
