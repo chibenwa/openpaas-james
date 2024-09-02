@@ -46,12 +46,12 @@ import org.apache.james.modules.event.JMAPEventBusModule;
 import org.apache.james.modules.event.RabbitMQEventBusModule;
 import org.apache.james.modules.eventstore.CassandraEventStoreModule;
 import org.apache.james.modules.mailbox.CassandraBlobStoreDependenciesModule;
-import org.apache.james.modules.mailbox.CassandraDeletedMessageVaultModule;
 import org.apache.james.modules.mailbox.CassandraMailboxModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaLegacyModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaModule;
 import org.apache.james.modules.mailbox.CassandraQuotaMailingModule;
 import org.apache.james.modules.mailbox.CassandraSessionModule;
+import org.apache.james.modules.mailbox.DistributedDeletedMessageVaultModule;
 import org.apache.james.modules.mailbox.OpenSearchClientModule;
 import org.apache.james.modules.mailbox.OpenSearchDisabledModule;
 import org.apache.james.modules.mailbox.OpenSearchMailboxModule;
@@ -270,7 +270,7 @@ public class DistributedServer {
     public static final Module CASSANDRA_MAILBOX_MODULE = Modules.combine(
         new CassandraConsistencyTaskSerializationModule(),
         new CassandraMailboxModule(),
-        new CassandraDeletedMessageVaultModule(),
+        new DistributedDeletedMessageVaultModule(),
         new MailboxModule(),
         new TikaMailboxModule());
 
