@@ -47,6 +47,7 @@ import com.linagora.tmail.migration.core.ReflectiveChannelAccessor;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.handler.ssl.SslHandler;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -135,14 +136,21 @@ public class ProxyImapProcessor implements ImapProcessor {
     }
 
     private void writeCapabilities(Channel clientChannel, ImapSession session, String tag) {
-        // We only implement the LOGIN command (not the AUTHENTICATE SASL flow), so we must not advertise
-        // AUTH=PLAIN: a client picking AUTHENTICATE PLAIN over LOGIN would otherwise be rejected.
         StringBuilder capabilities = new StringBuilder("* CAPABILITY IMAP4rev1");
         if (session.supportStartTLS()) {
             capabilities.append(" STARTTLS");
         }
+        // Only advertise AUTH=PLAIN once the channel is encrypted: credentials must never be sent in
+        // clear text, and clients rely on this capability to know authentication is now acceptable.
+        if (isChannelEncrypted(clientChannel)) {
+            capabilities.append(" AUTH=PLAIN");
+        }
         writeLine(clientChannel, capabilities.toString());
         writeLine(clientChannel, tag + " OK CAPABILITY completed.");
+    }
+
+    private boolean isChannelEncrypted(Channel clientChannel) {
+        return clientChannel.pipeline().get(SslHandler.class) != null;
     }
 
     private void startTls(ImapSession session, Channel clientChannel, String tag) {
