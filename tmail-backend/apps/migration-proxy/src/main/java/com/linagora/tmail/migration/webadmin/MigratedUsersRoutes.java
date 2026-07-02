@@ -18,6 +18,8 @@
 
 package com.linagora.tmail.migration.webadmin;
 
+import java.time.Duration;
+
 import jakarta.inject.Inject;
 
 import org.apache.james.core.Username;
@@ -48,6 +50,8 @@ public class MigratedUsersRoutes implements Routes {
     private static final String USERNAME_PARAM = ":username";
     private static final String BASE_PATH = Constants.SEPARATOR + "migratedUsers";
     private static final String USER_PATH = BASE_PATH + Constants.SEPARATOR + USERNAME_PARAM;
+    // Bound the blocking wait so a stuck backing store surfaces an admin error rather than hanging the request thread.
+    private static final Duration BLOCK_TIMEOUT = Duration.ofMinutes(1);
 
     private final MigratedUsersRepository migratedUsersRepository;
     private final JsonTransformer jsonTransformer;
@@ -75,19 +79,19 @@ public class MigratedUsersRoutes implements Routes {
         return (request, response) -> migratedUsersRepository.listMigratedUsers()
             .map(Username::asString)
             .collectList()
-            .block();
+            .block(BLOCK_TIMEOUT);
     }
 
     private Route addMigratedUser() {
         return (request, response) -> {
-            migratedUsersRepository.addMigratedUser(extractUsername(request)).block();
+            migratedUsersRepository.addMigratedUser(extractUsername(request)).block(BLOCK_TIMEOUT);
             return noContent(response);
         };
     }
 
     private Route removeMigratedUser() {
         return (request, response) -> {
-            migratedUsersRepository.removeMigratedUser(extractUsername(request)).block();
+            migratedUsersRepository.removeMigratedUser(extractUsername(request)).block(BLOCK_TIMEOUT);
             return noContent(response);
         };
     }
@@ -95,7 +99,7 @@ public class MigratedUsersRoutes implements Routes {
     private Route isMigrated() {
         return (request, response) -> {
             boolean migrated = migratedUsersRepository.isMigrated(extractUsername(request))
-                .blockOptional()
+                .blockOptional(BLOCK_TIMEOUT)
                 .orElse(false);
             if (!migrated) {
                 throw ErrorResponder.builder()

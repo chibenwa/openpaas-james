@@ -138,13 +138,29 @@ public class BackendRelay {
             return Optional.of(backendChannel);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            clientChannel.config().setAutoRead(true);
+            abandonHandshake(clientChannel, handshakeResult);
             return Optional.empty();
         } catch (ExecutionException | TimeoutException e) {
             LOGGER.warn("Failed establishing relay to backend {}", backend, e);
-            clientChannel.config().setAutoRead(true);
+            abandonHandshake(clientChannel, handshakeResult);
             return Optional.empty();
         }
+    }
+
+    /**
+     * The relay attempt is being given up (the handshake timed out or the calling thread was
+     * interrupted). Beyond restoring the client read flow, we must make sure a backend connection whose
+     * handshake completes <em>after</em> this point is closed rather than left dangling: otherwise a late
+     * {@link HandshakeHandler#activateBackendSide} would wire a {@link RelayHandler} piping backend bytes
+     * into an abandoned client and leak the backend socket.
+     */
+    private void abandonHandshake(Channel clientChannel, CompletableFuture<Channel> handshakeResult) {
+        clientChannel.config().setAutoRead(true);
+        handshakeResult.whenComplete((backendChannel, throwable) -> {
+            if (backendChannel != null) {
+                backendChannel.close();
+            }
+        });
     }
 
     /**
@@ -332,10 +348,26 @@ public class BackendRelay {
             volumeRecorder.accept(buffer.readableBytes());
             if (peer.isActive()) {
                 peer.writeAndFlush(buffer);
+                // Backpressure: when the peer's send buffer fills up (a slow backend or a slow client),
+                // stop reading from this side so bytes are not accumulated in memory faster than the peer
+                // can drain them. Reads resume from channelWritabilityChanged once the peer is writable again.
+                if (!peer.isWritable()) {
+                    ctx.channel().config().setAutoRead(false);
+                }
             } else {
                 buffer.release();
                 ctx.close();
             }
+        }
+
+        @Override
+        public void channelWritabilityChanged(ChannelHandlerContext ctx) {
+            // Our own channel drained: let the opposite direction (whose RelayHandler writes into us and
+            // may have paused its source) resume reading.
+            if (ctx.channel().isWritable()) {
+                peer.config().setAutoRead(true);
+            }
+            ctx.fireChannelWritabilityChanged();
         }
 
         @Override

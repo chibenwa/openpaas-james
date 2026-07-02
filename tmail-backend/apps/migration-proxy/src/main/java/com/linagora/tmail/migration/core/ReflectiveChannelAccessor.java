@@ -19,6 +19,8 @@
 package com.linagora.tmail.migration.core;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.netty.channel.Channel;
@@ -44,14 +46,25 @@ public class ReflectiveChannelAccessor {
     }
 
     private static Field findChannelField(Class<?> type) {
+        List<Field> candidates = new ArrayList<>();
         for (Class<?> current = type; current != null; current = current.getSuperclass()) {
             for (Field field : current.getDeclaredFields()) {
                 if (Channel.class.isAssignableFrom(field.getType())) {
-                    field.setAccessible(true);
-                    return field;
+                    candidates.add(field);
                 }
             }
         }
-        throw new IllegalStateException("No netty Channel field found on " + type);
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("No netty Channel field found on " + type);
+        }
+        // Assert uniqueness: if a future James internal change introduces a second Channel-typed field we
+        // want to fail fast here rather than silently pick the wrong one and proxy against a stale channel.
+        if (candidates.size() > 1) {
+            throw new IllegalStateException("Expected exactly one netty Channel field on " + type
+                + " but found " + candidates.size() + ": " + candidates);
+        }
+        Field field = candidates.get(0);
+        field.setAccessible(true);
+        return field;
     }
 }
